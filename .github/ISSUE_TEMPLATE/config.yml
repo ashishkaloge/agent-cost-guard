@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/incline-ltd/agent-cost-guard/security/advisories/new
+    url: https://github.com/ashishkaloge/agent-cost-guard/security/advisories/new
     about: Report bypasses, credential exposure, or command-execution vulnerabilities privately.
