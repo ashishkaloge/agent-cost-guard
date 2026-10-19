@@ -6,11 +6,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/incline-ltd/agent-cost-guard.git"
+    "url": "git+https://github.com/ashishkaloge/agent-cost-guard.git"
   },
-  "homepage": "https://github.com/incline-ltd/agent-cost-guard#readme",
+  "homepage": "https://github.com/ashishkaloge/agent-cost-guard#readme",
   "bugs": {
-    "url": "https://github.com/incline-ltd/agent-cost-guard/issues"
+    "url": "https://github.com/ashishkaloge/agent-cost-guard/issues"
   },
   "publishConfig": {
     "access": "public"
