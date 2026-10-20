@@ -1,6 +1,6 @@
 # Agent Cost Guard
 
-[![CI](https://github.com/incline-ltd/agent-cost-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/incline-ltd/agent-cost-guard/actions/workflows/ci.yml)
+[![CI](https://github.com/ashishkaloge/agent-cost-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/ashishkaloge/agent-cost-guard/actions/workflows/ci.yml)
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933)](https://nodejs.org/)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -16,7 +16,7 @@ account, API key, LLM, telemetry, network call, or runtime dependency.
 ## 60-second demo
 
 ```bash
-git clone https://github.com/incline-ltd/agent-cost-guard.git
+git clone https://github.com/ashishkaloge/agent-cost-guard.git
 cd agent-cost-guard
 npm ci
 npm run build
@@ -260,9 +260,9 @@ adapter, copyable configuration, fixtures, and package-level tests. It does not
 mean that every tool path in every host can be intercepted.
 
 Found a missed cost action or a wrong decision? Use the
-[wrong-decision report](https://github.com/incline-ltd/agent-cost-guard/issues/new?template=wrong-decision.yml).
+[wrong-decision report](https://github.com/ashishkaloge/agent-cost-guard/issues/new?template=wrong-decision.yml).
 Tested a host or agent version? Share the result through the
-[host-compatibility report](https://github.com/incline-ltd/agent-cost-guard/issues/new?template=host-compatibility.yml).
+[host-compatibility report](https://github.com/ashishkaloge/agent-cost-guard/issues/new?template=host-compatibility.yml).
 
 ## Inspect the policy
 
@@ -341,7 +341,7 @@ see [SECURITY.md](SECURITY.md).
 
 ## Related projects
 
-- [awesome-agent-instructions](https://github.com/incline-ltd/awesome-agent-instructions)
+- [awesome-agent-instructions](https://github.com/ashishkaloge/awesome-agent-instructions)
 
 ## License
 
