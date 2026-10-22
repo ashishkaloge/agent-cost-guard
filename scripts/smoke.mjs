@@ -5,7 +5,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +13,11 @@ import { join } from 'node:path';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CLI = fileURLToPath(new URL('../dist/bin.js', import.meta.url));
 const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+
+// Every subprocess logs to a temporary decision log, never the real one.
+const LOG_DIR = mkdtempSync(join(tmpdir(), 'agent-cost-guard-smoke-log-'));
+const LOG_FILE = join(LOG_DIR, 'decisions.jsonl');
+const ENV = { ...process.env, AGENT_COST_GUARD_LOG: 'on', AGENT_COST_GUARD_LOG_FILE: LOG_FILE };
 
 let failures = 0;
 function check(name, condition) {
@@ -24,10 +29,11 @@ function check(name, condition) {
   }
 }
 
-function cli(args, input) {
+function cli(args, input, env = ENV) {
   const result = spawnSync(process.execPath, [CLI, ...args], {
     input: input ?? '',
     encoding: 'utf8',
+    env,
   });
   return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -38,6 +44,11 @@ function parseJson(text) {
   } catch {
     return undefined;
   }
+}
+
+function logEntries() {
+  if (!existsSync(LOG_FILE)) return [];
+  return readFileSync(LOG_FILE, 'utf8').trim().split('\n').filter(Boolean).map(parseJson);
 }
 
 console.log('inspect:');
@@ -201,6 +212,45 @@ check(
     r.stdout.includes('bypass'),
 );
 
+console.log('decision log:');
+const hosts = new Set(logEntries().map((entry) => entry?.host));
+check(
+  'hooks and inspect recorded their decisions',
+  ['cli', 'generic', 'claude-code', 'codex', 'cursor', 'github-copilot'].every((host) => hosts.has(host)),
+);
+check(
+  'log never records allow decisions',
+  logEntries().every((entry) => entry?.decision === 'approval-required' || entry?.decision === 'block'),
+);
+check('log redacts a multiword secret', !readFileSync(LOG_FILE, 'utf8').includes('fake multiword password'));
+
+const before = logEntries().length;
+r = cli(
+  ['hook', 'claude-code'],
+  JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'terraform apply' } }),
+  { ...ENV, AGENT_COST_GUARD_LOG: 'off' },
+);
+check(
+  'AGENT_COST_GUARD_LOG=off keeps the decision and records nothing',
+  parseJson(r.stdout)?.hookSpecificOutput?.permissionDecision === 'ask' && logEntries().length === before,
+);
+
+r = cli(
+  ['hook', 'codex'],
+  JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'terraform apply' } }),
+  { ...ENV, AGENT_COST_GUARD_LOG_FILE: join(CLI, 'decisions.jsonl') },
+);
+check(
+  'unwritable log keeps valid hook output',
+  r.code === 0 && r.stderr === '' && parseJson(r.stdout)?.hookSpecificOutput?.permissionDecision === 'deny',
+);
+
+r = cli(['report', '--json', '--since', '1d']);
+check('report --json counts logged decisions', r.code === 0 && parseJson(r.stdout)?.total === before);
+
+r = cli(['report']);
+check('report prints a human summary', r.code === 0 && r.stdout.includes('By reason code:'));
+
 console.log('rules:');
 r = cli(['rules', 'list']);
 check('rules list shows a known rule', r.code === 0 && r.stdout.includes('aws.ec2.run-instances'));
@@ -290,13 +340,13 @@ try {
       const bin = process.platform === 'win32'
         ? join(prefix, 'agent-cost-guard.cmd')
         : join(prefix, 'bin', 'agent-cost-guard');
-      const installedVersion = spawnSync(bin, ['--version'], { encoding: 'utf8' });
+      const installedVersion = spawnSync(bin, ['--version'], { encoding: 'utf8', env: ENV });
       check(
         'installed agent-cost-guard executable runs',
         installedVersion.status === 0 && /^\d+\.\d+\.\d+\s*$/.test(installedVersion.stdout),
       );
 
-      const installedDoctor = spawnSync(bin, ['doctor'], { encoding: 'utf8' });
+      const installedDoctor = spawnSync(bin, ['doctor'], { encoding: 'utf8', env: ENV });
       check(
         'installed executable reports local adapter status',
         installedDoctor.status === 0 &&
@@ -307,7 +357,7 @@ try {
       const installedInspect = spawnSync(
         bin,
         ['inspect', '--json', '--', 'terraform', 'apply', 'fake.plan'],
-        { encoding: 'utf8' },
+        { encoding: 'utf8', env: ENV },
       );
       check(
         'installed executable performs a real inspection',
@@ -324,6 +374,7 @@ try {
             tool_input: { command: 'aws ec2 run-instances' },
           }),
           encoding: 'utf8',
+          env: ENV,
         },
       );
       check(
@@ -341,6 +392,7 @@ try {
             tool_input: { command: 'terraform apply' },
           }),
           encoding: 'utf8',
+          env: ENV,
         },
       );
       check(
@@ -351,6 +403,7 @@ try {
   }
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });
+  rmSync(LOG_DIR, { recursive: true, force: true });
 }
 
 if (failures > 0) {

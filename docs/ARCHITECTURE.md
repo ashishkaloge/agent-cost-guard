@@ -29,6 +29,7 @@ CLI, TypeScript caller, or host hook
   -> order block and approval matches
   -> redact evidence
   -> emit the CLI or host-protocol decision
+  -> append approval-required and block decisions to the local log
 ```
 
 ## Repository map
@@ -37,7 +38,8 @@ CLI, TypeScript caller, or host hook
 src/
   adapters/       Host payload parsing and decision mapping
   core/           Types, normalization, tokenization, matching, and rules
-  format/         Human and machine-readable decision output
+  format/         Human and machine-readable decision and report output
+  log/            Local decision log
   redaction/      Output redaction
   bin.ts          Executable entry point
   cli.ts          Importable CLI argument handling
@@ -88,6 +90,19 @@ every distinct cost approval it requires.
 
 CLI and hook stdin is capped at 1 MiB. Oversized generic JSON is rejected, and
 strict host hooks convert oversized input into the host's native deny response.
+
+### Decision log
+
+The CLI, not the core or the adapters, owns the decision log. Adapters expose
+an optional `onDecision` observer whose errors are ignored; the CLI collects
+decisions through it and appends them only after the host or terminal output
+has been written. `doctor` and library callers record nothing.
+
+Each line holds the time, host, decision, reason code, rule-defined provider
+and resource, matched rule IDs, and the redacted command. For tools that are
+not shell commands, it holds the tool name or path plus the matched evidence,
+not the file body. Every write failure is swallowed. `report` reads the log
+back as untrusted data, re-redacts it, and strips terminal control characters.
 
 ## Deliberate non-goals
 

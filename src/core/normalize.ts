@@ -60,6 +60,9 @@ const FILE_TOOLS = new Set([
   'update_file',
 ]);
 
+/** Argument keys that carry the command of a shell tool call. */
+const SHELL_COMMAND_KEYS = ['command', 'cmd', 'script', 'input', 'commandLine'];
+
 const TERRAFORM_SUFFIXES = ['.tf', '.tf.json', '.tofu'];
 
 function issue(code: string, message: string): InspectionIssue {
@@ -263,7 +266,7 @@ function routeTool(action: ToolAction): NormalizationResult {
   const args = action.arguments;
 
   if (SHELL_TOOLS.has(name)) {
-    const command = firstString(args, ['command', 'cmd', 'script', 'input', 'commandLine']);
+    const command = firstString(args, SHELL_COMMAND_KEYS);
     if (command === undefined) {
       return {
         units: [],
@@ -310,6 +313,12 @@ function normalizeFileChange(action: FileChangeAction): NormalizationResult {
     }
   }
   return { units: [{ kind: 'file-change', action }], complete: true, issues: [] };
+}
+
+/** The raw command text of a shell tool call, or undefined for any other tool. */
+export function toolShellCommand(action: ToolAction): string | undefined {
+  if (!SHELL_TOOLS.has(action.name.toLowerCase())) return undefined;
+  return firstString(action.arguments, SHELL_COMMAND_KEYS);
 }
 
 /** Normalize any action and retain whether inspection was complete. */
