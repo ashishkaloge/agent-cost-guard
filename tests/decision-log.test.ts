@@ -396,6 +396,38 @@ describe('cli report', () => {
     expect(run(['report', '--since', '2021-01-01']).out).toContain('Decisions: 1');
   });
 
+  it.each(['UTC', 'Asia/Kolkata', 'America/New_York'])(
+    'uses UTC for offset-free --since datetimes in %s',
+    (timezone) => {
+      const previousTimezone = process.env.TZ;
+      process.env.TZ = timezone;
+      try {
+        writeLog([
+          entry({ time: '2026-10-01T18:00:00.000Z' }),
+          entry({ time: '2026-10-01T20:00:00.000Z' }),
+        ]);
+        for (const since of [
+          '2026-10-01T20:00',
+          '2026-10-01T20:00:00',
+          '2026-10-01T20:00:00.000',
+          '2026-10-01T20:00:00Z',
+          '2026-10-02T01:30:00+05:30',
+          '2026-10-01T16:00:00-04:00',
+        ]) {
+          const result = run(['report', '--json', '--since', since]);
+          expect(result.code).toBe(0);
+          expect(JSON.parse(result.out), since).toMatchObject({
+            since: '2026-10-01T20:00:00.000Z',
+            total: 1,
+          });
+        }
+      } finally {
+        if (previousTimezone === undefined) delete process.env.TZ;
+        else process.env.TZ = previousTimezone;
+      }
+    },
+  );
+
   it('shows at most ten recent entries', () => {
     writeLog(Array.from({ length: 12 }, (_, i) => entry({ time: hoursAgo(i + 1) })));
     const r = run(['report']);

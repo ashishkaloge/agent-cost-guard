@@ -405,7 +405,12 @@ function parseSince(value: string, now: Date): Date | undefined {
     return new Date(now.getTime() - Number(age[1]) * unit);
   }
   if (/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?$/.test(value)) {
-    const time = Date.parse(value);
+    // Date-only values already parse as UTC; offset-free datetimes otherwise
+    // use the host timezone, which would change the reported decision counts.
+    const utcValue = value.includes('T') && !/(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+      ? `${value}Z`
+      : value;
+    const time = Date.parse(utcValue);
     if (!Number.isNaN(time)) return new Date(time);
   }
   return undefined;
