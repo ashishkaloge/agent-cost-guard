@@ -69,7 +69,9 @@ it runs. It returns one of three decisions:
   safely understand it.
 
 Inspection is local and deterministic. The package has no account, API key,
-LLM, telemetry, network call, or runtime dependency.
+LLM, telemetry, network call, or runtime dependency. Every approval-required or
+block decision is written to a local log that `report` summarizes; the log never
+leaves your machine.
 
 ## Actual use cases
 
@@ -94,6 +96,9 @@ details a person must review before deciding how to proceed.
   plus exit code as a policy gate.
 - A maintainer can list and explain every rule to audit exactly what the guard
   checks.
+- A person wants to know what the guard actually did. `report` counts the
+  actions it held for approval or blocked, by provider, reason, and agent, and
+  lists the latest commands from a local log.
 
 The tool does not know the live state of a cloud account and does not calculate
 an exact bill. It states when price is unknown instead of inventing one.
@@ -264,6 +269,89 @@ Found a missed cost action or a wrong decision? Use the
 Tested a host or agent version? Share the result through the
 [host-compatibility report](https://github.com/ashishkaloge/agent-cost-guard/issues/new?template=host-compatibility.yml).
 
+## See what it stopped
+
+Every `approval-required` or `block` decision from `inspect`, `inspect-json`,
+and the host hooks is appended to a local log. `allow` decisions are not
+recorded. Summarize the log with `report`:
+
+```bash
+node dist/bin.js report
+node dist/bin.js report --since 7d
+node dist/bin.js report --since 2026-10-01 --json
+```
+
+```text
+Agent Cost Guard report
+Log: ~/.local/state/agent-cost-guard/decisions.jsonl
+Period: since 2026-10-15 07:09 UTC
+
+Decisions: 7
+  approval-required  6
+  block              1
+
+By provider:
+  AWS                         3
+  Terraform-managed provider  2
+  Cloudflare                  1
+  agent-cost-guard            1
+
+By reason code:
+  terraform.apply             2
+  aws.ec2.run-instances       1
+  aws.rds.create-db-instance  1
+  aws.s3.mb                   1
+  cloudflare.wrangler.deploy  1
+  guard.bypass                1
+
+By host:
+  claude-code     2
+  codex           2
+  cli             1
+  cursor          1
+  github-copilot  1
+
+Most recent (7):
+  2026-10-22 07:09 UTC  cli             approval-required  terraform.apply
+    terraform apply saved.plan
+  2026-10-22 07:09 UTC  github-copilot  approval-required  aws.s3.mb
+    aws s3 mb s3://fake-bucket
+  2026-10-22 07:09 UTC  codex           block              guard.bypass
+    AGENT_COST_GUARD_DISABLED=1 terraform apply
+  2026-10-22 07:09 UTC  cursor          approval-required  aws.rds.create-db-instance
+    aws rds create-db-instance --db-instance-identifier fake-db --master-user-password [REDACTED]
+  2026-10-22 07:09 UTC  codex           approval-required  cloudflare.wrangler.deploy
+    npx wrangler deploy
+  2026-10-22 07:09 UTC  claude-code     approval-required  aws.ec2.run-instances
+    aws ec2 run-instances --image-id ami-00000000000000000 --instance-type t3.small
+  2026-10-22 07:09 UTC  claude-code     approval-required  terraform.apply
+    terraform apply
+```
+
+`--since` takes an age (`30m`, `24h`, `7d`, `2w`) or an ISO date, read as UTC
+when it has no offset. `--json` returns the same counts and the ten most recent
+entries for scripts. `report` exits `0`, `64` for invalid flags, or `1` when
+the log exists but cannot be read.
+
+The log records what the guard saw, not what happened next. An approval a
+person later granted and an action that was denied look the same in it.
+
+Each line of the log is one JSON object:
+
+```json
+{"version":"1","time":"2026-10-22T07:09:11.853Z","host":"claude-code","decision":"approval-required","reasonCode":"terraform.apply","provider":"Terraform-managed provider","resource":"planned infrastructure changes","rules":["terraform.apply"],"command":"terraform apply"}
+```
+
+| Setting | Effect |
+| --- | --- |
+| Default location | `$XDG_STATE_HOME/agent-cost-guard/decisions.jsonl`, otherwise `~/.local/state/agent-cost-guard/decisions.jsonl` (`%LOCALAPPDATA%\agent-cost-guard\decisions.jsonl` on Windows) |
+| `AGENT_COST_GUARD_LOG=off` | Record nothing. Decisions do not change. `0`, `false`, and `no` also work. |
+| `AGENT_COST_GUARD_LOG_FILE=<path>` | Write to this file instead. A relative path resolves against the hook's working directory. |
+
+Set these in the environment that starts the agent, such as your shell profile,
+so the hook process inherits them. Delete the log file at any time to clear the
+history.
+
 ## Inspect the policy
 
 ```bash
@@ -282,7 +370,14 @@ contract coverage. Rule IDs are stable and rules are validated when loaded.
 - Treat hook payloads and proposed tool arguments as untrusted data.
 - Redact possible credentials before output, diagnostics, snapshots, or logs.
 - Limit CLI and hook input to 1 MiB; strict hooks deny oversized input.
-- Make no network request during inspection.
+- Make no network request during inspection or reporting.
+- Keep the decision log on this machine. It holds only approval-required and
+  block decisions, stores redacted command text capped at 500 characters, and is
+  created readable by the current user only. File edits are logged as the tool
+  name and matched resource, not the file body.
+- Write the log only after the decision has been returned, and ignore any log
+  write failure, so logging never changes or breaks a decision. Hook stdout
+  stays valid host JSON either way.
 - Never weaken the host agent's own permission system.
 - Keep automatic approval impossible.
 - Use fake cloud identifiers and credentials in fixtures.
@@ -301,13 +396,18 @@ to intercept a proposed action before execution, this package cannot enforce a
 decision. See [Integrations](docs/INTEGRATIONS.md) for current Codex and Cursor
 host limitations.
 
+The decision log lives where the hook runs. Hooks on a remote runner, such as
+the GitHub Copilot cloud agent, write it on that runner, and it is gone when the
+runner is.
+
 ## Project layout
 
 ```text
 src/
   adapters/       Claude Code, Codex, Cursor, and Copilot protocol mapping
   core/           contracts, normalization, tokenization, matching, rules
-  format/         human and JSON decision output
+  format/         human and JSON decision and report output
+  log/            local decision log
   redaction/      credential-safe output
   bin.ts          executable entry point
   cli.ts          importable CLI handling

@@ -18,6 +18,11 @@ export interface AdapterOptions {
   strict?: boolean;
   /** Injectable rule set for tests. */
   inspectOptions?: InspectOptions;
+  /**
+   * Observer for the core decision, used by the CLI's local decision log.
+   * Anything it throws is ignored, so it can never change the host response.
+   */
+  onDecision?: (request: InspectionRequest, decision: Decision) => void;
 }
 
 /** Build a structured tool action from an untrusted name/arguments pair. */
@@ -59,5 +64,11 @@ export function inspectTool(
   const request: InspectionRequest = { source, mode, action };
   const inspectOptions: InspectOptions = { ...options.inspectOptions };
   if (options.strict !== undefined) inspectOptions.strict = options.strict;
-  return inspect(request, inspectOptions);
+  const decision = inspect(request, inspectOptions);
+  try {
+    options.onDecision?.(request, decision);
+  } catch {
+    // Observers are best effort; the decision stands.
+  }
+  return decision;
 }

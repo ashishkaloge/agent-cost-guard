@@ -9,12 +9,16 @@
  *   hook cursor [--strict|--no-strict]
  *   hook copilot [--mode interactive|cloud|vscode] [--strict|--no-strict]
  *   doctor
+ *   report [--since <age|date>] [--json]
  *   rules list [--json]
  *   rules explain <rule-id> [--json]
  *
  * Generic inspect exit codes: 0 allow, 2 approval-required, 3 block,
  * 64 invalid usage. Hook subcommands follow their host protocol on stdout and
  * exit 0; they never use the generic exit-code contract.
+ *
+ * Approval-required and block decisions from inspect, inspect-json, and hooks
+ * are appended to the local decision log after their output is written.
  */
 
 import { readFileSync, readSync } from 'node:fs';
@@ -29,6 +33,14 @@ import { inspect } from './core/classify.js';
 import { loadRules } from './core/rules.js';
 import { parseInspectionRequest, type Decision, type InspectionRequest } from './core/types.js';
 import { formatHuman, formatJson } from './format/output.js';
+import { formatReportHuman, formatReportJson, summarizeDecisions } from './format/report.js';
+import {
+  decisionLogLocation,
+  displayLogPath,
+  readDecisionLog,
+  recordDecision,
+  type DecisionLogContents,
+} from './log/decision-log.js';
 import { redact } from './redaction/redact.js';
 
 const EXIT = { allow: 0, error: 1, approval: 2, block: 3, usage: 64 } as const;
@@ -44,12 +56,15 @@ Usage:
   agent-cost-guard hook cursor [--strict|--no-strict]
   agent-cost-guard hook copilot [--mode interactive|cloud|vscode] [--strict|--no-strict]
   agent-cost-guard doctor
+  agent-cost-guard report [--since <age|date>] [--json]
   agent-cost-guard rules list [--json]
   agent-cost-guard rules explain <rule-id> [--json]
   agent-cost-guard --help | --version
 
 Inspect exit codes: 0 allow, 2 approval-required, 3 block, 64 invalid usage.
-Hook subcommands emit host-protocol JSON on stdout and exit 0.`;
+Hook subcommands emit host-protocol JSON on stdout and exit 0.
+Approval-required and block decisions are logged locally; set
+AGENT_COST_GUARD_LOG=off to stop logging.`;
 
 function decisionExitCode(decision: Decision): number {
   if (decision.decision === 'approval-required') return EXIT.approval;
@@ -136,6 +151,7 @@ function runInspect(args: string[]): number {
     }
   }
   process.stdout.write(`${json ? formatJson(decision) : formatHuman(decision)}\n`);
+  recordDecision(request, decision);
   return decisionExitCode(decision);
 }
 
@@ -164,10 +180,27 @@ function runInspectJson(args: string[], stdin?: string): number {
 
   const decision = inspect(parsed.request, { strict: args.includes('--strict') });
   process.stdout.write(`${formatJson(decision)}\n`);
+  recordDecision(parsed.request, decision);
   return decisionExitCode(decision);
 }
 
 type StrictHookRunner = (raw: string, options: AdapterOptions) => HookResult;
+
+/** Hold hook decisions so the log is written only after the host response. */
+function hookDecisionLog(): {
+  onDecision: NonNullable<AdapterOptions['onDecision']>;
+  flush: () => void;
+} {
+  const observed: Array<{ request: InspectionRequest; decision: Decision }> = [];
+  return {
+    onDecision: (request, decision) => {
+      observed.push({ request, decision });
+    },
+    flush: () => {
+      for (const { request, decision } of observed) recordDecision(request, decision);
+    },
+  };
+}
 
 function runStrictHook(
   host: 'claude-code' | 'codex' | 'cursor',
@@ -183,8 +216,10 @@ function runStrictHook(
   }
   const strict = !flags.includes('--no-strict');
   const input = readStdin(stdin);
-  const result = runner(input.oversized ? '' : input.raw, { strict });
+  const log = hookDecisionLog();
+  const result = runner(input.oversized ? '' : input.raw, { strict, onDecision: log.onDecision });
   if (result.stdout) process.stdout.write(`${result.stdout}\n`);
+  log.flush();
   return result.exitCode;
 }
 
@@ -239,8 +274,14 @@ function runHook(args: string[], stdin?: string): number {
       return usageError(`Unknown Copilot hook flag: ${flag}`);
     }
     const input = readStdin(stdin);
-    const result = runCopilotHook(input.oversized ? '' : input.raw, { strict, mode });
+    const log = hookDecisionLog();
+    const result = runCopilotHook(input.oversized ? '' : input.raw, {
+      strict,
+      mode,
+      onDecision: log.onDecision,
+    });
     if (result.stdout) process.stdout.write(`${result.stdout}\n`);
+    log.flush();
     return result.exitCode;
   }
   return usageError(`Unknown hook host: ${host ?? '(none)'}`);
@@ -349,6 +390,81 @@ function runDoctor(args: string[]): number {
   }
 }
 
+const SINCE_UNIT_MS: Record<string, number> = {
+  m: 60_000,
+  h: 3_600_000,
+  d: 86_400_000,
+  w: 604_800_000,
+};
+
+/** Parse `--since` as an age (`30m`, `24h`, `7d`, `2w`) or an ISO date. */
+function parseSince(value: string, now: Date): Date | undefined {
+  const age = /^(\d{1,6})([mhdw])$/.exec(value);
+  if (age) {
+    const unit = SINCE_UNIT_MS[age[2] as string] as number;
+    return new Date(now.getTime() - Number(age[1]) * unit);
+  }
+  if (/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?$/.test(value)) {
+    const time = Date.parse(value);
+    if (!Number.isNaN(time)) return new Date(time);
+  }
+  return undefined;
+}
+
+function runReport(args: string[]): number {
+  let json = false;
+  let sinceValue: string | undefined;
+  for (let i = 0; i < args.length; i += 1) {
+    const flag = args[i] as string;
+    if (flag === '--json') {
+      json = true;
+      continue;
+    }
+    if (flag === '--since' || flag.startsWith('--since=')) {
+      if (sinceValue !== undefined) return usageError('report accepts --since only once.');
+      if (flag === '--since') {
+        sinceValue = args[i + 1] ?? '';
+        i += 1;
+      } else {
+        sinceValue = flag.slice('--since='.length);
+      }
+      continue;
+    }
+    return usageError(`Unknown report flag: ${flag}`);
+  }
+
+  let since: Date | undefined;
+  if (sinceValue !== undefined) {
+    since = parseSince(sinceValue, new Date());
+    if (!since) {
+      return usageError(
+        'report --since must be an age such as 24h, 7d, or 2w, or a date such as 2026-01-31.',
+      );
+    }
+  }
+
+  const location = decisionLogLocation();
+  const logPath = displayLogPath(location.path);
+  let contents: DecisionLogContents;
+  try {
+    contents = readDecisionLog(location.path);
+  } catch {
+    diagnostic(`Agent Cost Guard could not read the decision log at ${logPath}.`);
+    return EXIT.error;
+  }
+  const report = summarizeDecisions(contents.entries, since);
+  const context = {
+    logPath,
+    logEnabled: location.enabled,
+    logExists: contents.exists,
+    skippedLines: contents.skipped,
+  };
+  process.stdout.write(
+    `${json ? formatReportJson(report, context) : formatReportHuman(report, context)}\n`,
+  );
+  return EXIT.allow;
+}
+
 function runRules(args: string[]): number {
   const sub = args[0];
 
@@ -443,6 +559,8 @@ export function main(argv: string[], stdin?: string): number {
       return runHook(rest, stdin);
     case 'doctor':
       return runDoctor(rest);
+    case 'report':
+      return runReport(rest);
     case 'rules':
       return runRules(rest);
     default:

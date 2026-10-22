@@ -235,6 +235,17 @@ Expected result: the host denies it and shows a reason that says a cost-guard
 bypass was blocked. If the host runs it, the hook is not active. The command
 has no cloud or filesystem side effect, even when the hook is missing.
 
+The guard's local decision log confirms the same thing from its side:
+
+```bash
+./node_modules/.bin/agent-cost-guard report --since 10m
+```
+
+A `guard.bypass` block under that host's name shows that the hook ran. Hooks
+on a remote runner, such as the GitHub Copilot cloud agent, write the log on
+that runner instead. Set `AGENT_COST_GUARD_LOG=off` in the agent's environment
+to stop logging; decisions do not change.
+
 Do not run a real resource-creation command merely to test an integration. The
 adapter examples pass proposed cloud commands as strings to the guard and do
 not execute them.

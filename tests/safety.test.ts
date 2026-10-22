@@ -7,6 +7,9 @@
  * offline by construction.
  */
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 const boom = (name: string) => () => {
@@ -55,6 +58,8 @@ const { runClaudeCodeHook } = await import('../src/adapters/claude-code.js');
 const { runCodexHook } = await import('../src/adapters/codex.js');
 const { runCursorHook } = await import('../src/adapters/cursor.js');
 const { runCopilotHook } = await import('../src/adapters/github-copilot.js');
+const { recordDecision, readDecisionLog } = await import('../src/log/decision-log.js');
+const { summarizeDecisions } = await import('../src/format/report.js');
 const { shellCases, toolCases, fileChangeCases, shellRequest } = await import('./helpers/fixtures.js');
 
 describe('no execution or network during inspection', () => {
@@ -90,6 +95,19 @@ describe('no execution or network during inspection', () => {
       tool_input: { command: 'terraform apply' },
     });
     expect(() => runCopilotHook(vscodePayload, { mode: 'vscode' })).not.toThrow();
+  });
+
+  it('records and reports decisions locally without execution or network', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-cost-guard-safety-'));
+    try {
+      const env = { AGENT_COST_GUARD_LOG_FILE: join(dir, 'decisions.jsonl') };
+      const request = shellRequest('terraform apply');
+      expect(() => recordDecision(request, inspect(request), env)).not.toThrow();
+      const log = readDecisionLog(env.AGENT_COST_GUARD_LOG_FILE);
+      expect(summarizeDecisions(log.entries).total).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('inspect is total: it never throws on adversarial input', () => {
