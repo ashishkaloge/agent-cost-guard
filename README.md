@@ -35,7 +35,7 @@ first package release.
 
 | Surface | Protocol and package tests | Live host proof | Cost-match behavior |
 | --- | --- | --- | --- |
-| Claude Code and Claude Desktop Code | Passed | Pending | Ask the user; policy blocks deny |
+| Claude Code and Claude Desktop Code | Passed | Passed in headless `claude -p`: cost command held before it ran; interactive prompt pending | Ask the user; policy blocks deny |
 | Codex | Passed | Pending | Deny with approval details because hooks cannot ask interactively |
 | Cursor | Passed | Passed: bypass command denied | Deny with approval details; current host race is documented |
 | GitHub Copilot CLI | Passed | Pending | Ask the user |
