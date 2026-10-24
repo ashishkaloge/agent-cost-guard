@@ -16,7 +16,7 @@ account, API key, LLM, telemetry, network call, or runtime dependency.
 ## 60-second demo
 
 ```bash
-npm install --save-dev @ashishkaloge/agent-cost-guard@0.1.0
+npm install --save-dev @ashishkaloge/agent-cost-guard@0.1.1
 ./node_modules/.bin/agent-cost-guard doctor
 ./node_modules/.bin/agent-cost-guard inspect -- terraform apply
 ```
@@ -24,7 +24,7 @@ npm install --save-dev @ashishkaloge/agent-cost-guard@0.1.0
 The last command returns `APPROVAL REQUIRED` with exit code `2`. The proposed
 `terraform apply` is inspected as text and is never executed.
 
-Version 0.1.0 is a public preview. Check the supported hosts and limitations
+Version 0.1.1 is a public preview. Check the supported hosts and limitations
 below before connecting it to an agent.
 
 ## Support at a glance
@@ -131,7 +131,7 @@ responsibilities.
 Install the preview in the project that owns the agent configuration:
 
 ```bash
-npm install --save-dev @ashishkaloge/agent-cost-guard@0.1.0
+npm install --save-dev @ashishkaloge/agent-cost-guard@0.1.1
 ```
 
 The package name is `@ashishkaloge/agent-cost-guard`; the executable is
