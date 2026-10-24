@@ -445,6 +445,8 @@ see [SECURITY.md](SECURITY.md).
 
 - [awesome-agent-instructions](https://github.com/ashishkaloge/awesome-agent-instructions)
 
+Maintainers: see [npm releases](RELEASING.md) for the trusted publishing workflow.
+
 ## License
 
 [MIT](LICENSE)
