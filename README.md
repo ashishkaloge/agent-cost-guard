@@ -16,20 +16,16 @@ account, API key, LLM, telemetry, network call, or runtime dependency.
 ## 60-second demo
 
 ```bash
-git clone https://github.com/ashishkaloge/agent-cost-guard.git
-cd agent-cost-guard
-npm ci
-npm run build
-node dist/bin.js doctor
-node dist/bin.js inspect -- terraform apply
+npm install --save-dev @ashishkaloge/agent-cost-guard@0.1.0
+./node_modules/.bin/agent-cost-guard doctor
+./node_modules/.bin/agent-cost-guard inspect -- terraform apply
 ```
 
 The last command returns `APPROVAL REQUIRED` with exit code `2`. The proposed
 `terraform apply` is inspected as text and is never executed.
 
-This repository is a public preview. The npm package name is declared in the
-project metadata but is not published yet; use the source checkout until the
-first package release.
+Version 0.1.0 is a public preview. Check the supported hosts and limitations
+below before connecting it to an agent.
 
 ## Support at a glance
 
@@ -130,31 +126,37 @@ keeps control of its normal permission flow.
 See [Architecture](docs/ARCHITECTURE.md) for the data flow and folder
 responsibilities.
 
-## Run from source
+## Install
+
+Install the preview in the project that owns the agent configuration:
 
 ```bash
+npm install --save-dev @ashishkaloge/agent-cost-guard@0.1.0
+```
+
+The package name is `@ashishkaloge/agent-cost-guard`; the executable is
+`agent-cost-guard`. It has no runtime dependencies or install-time build step.
+
+### Run from source
+
+```bash
+git clone https://github.com/ashishkaloge/agent-cost-guard.git
+cd agent-cost-guard
 npm ci
 npm run build
 node dist/bin.js --version
 node dist/bin.js doctor
 ```
 
-The npm package name is `@ashishkaloge/agent-cost-guard`; the executable remains
-`agent-cost-guard`. The package is prepared for a public release but is not
-published by this repository change.
-
-After a release, install it in the project that owns the agent configuration:
-
-```bash
-npm install --save-dev @ashishkaloge/agent-cost-guard
-```
+The examples below use the installed package. In a source checkout, use
+`node dist/bin.js` in place of `./node_modules/.bin/agent-cost-guard`.
 
 ## Check the local guard
 
 Run the built-in local check before connecting an agent:
 
 ```bash
-node dist/bin.js doctor
+./node_modules/.bin/agent-cost-guard doctor
 ```
 
 ```text
@@ -186,7 +188,7 @@ machine-readable output.
 ## Inspect a command
 
 ```bash
-node dist/bin.js inspect -- aws ec2 run-instances \
+./node_modules/.bin/agent-cost-guard inspect -- aws ec2 run-instances \
   --image-id ami-00000000000000000 \
   --instance-type t3.small
 ```
@@ -210,14 +212,14 @@ Matched rules:
 Use `--json` for machine-readable output:
 
 ```bash
-node dist/bin.js inspect --json -- terraform apply saved.plan
+./node_modules/.bin/agent-cost-guard inspect --json -- terraform apply saved.plan
 ```
 
 Use `--strict` when incomplete shell syntax must block instead of returning a
 decision marked as incomplete:
 
 ```bash
-node dist/bin.js inspect --json --strict -- 'terraform apply "unfinished'
+./node_modules/.bin/agent-cost-guard inspect --json --strict -- 'terraform apply "unfinished'
 ```
 
 Exit codes are stable:
@@ -238,7 +240,7 @@ hook or a wrapper you control.
 
 ```bash
 printf '%s' '{"source":"generic","mode":"non-interactive","action":{"kind":"tool","name":"create_database","arguments":{"name":"example"}}}' \
-  | node dist/bin.js inspect-json --strict
+  | ./node_modules/.bin/agent-cost-guard inspect-json --strict
 ```
 
 The TypeScript API exports the same validated request and decision contracts.
@@ -276,9 +278,9 @@ and the host hooks is appended to a local log. `allow` decisions are not
 recorded. Summarize the log with `report`:
 
 ```bash
-node dist/bin.js report
-node dist/bin.js report --since 7d
-node dist/bin.js report --since 2026-10-01 --json
+./node_modules/.bin/agent-cost-guard report
+./node_modules/.bin/agent-cost-guard report --since 7d
+./node_modules/.bin/agent-cost-guard report --since 2026-10-01 --json
 ```
 
 ```text
@@ -355,9 +357,9 @@ history.
 ## Inspect the policy
 
 ```bash
-node dist/bin.js rules list
-node dist/bin.js rules list --json
-node dist/bin.js rules explain aws.ec2.run-instances
+./node_modules/.bin/agent-cost-guard rules list
+./node_modules/.bin/agent-cost-guard rules list --json
+./node_modules/.bin/agent-cost-guard rules explain aws.ec2.run-instances
 ```
 
 The current rules cover focused AWS, Terraform, Cloudflare, and generic cost

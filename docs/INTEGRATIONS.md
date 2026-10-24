@@ -5,10 +5,10 @@ project that owns the hook configuration so the hook does not depend on a
 global installation or a network download at runtime.
 
 ```bash
-npm install --save-dev @ashishkaloge/agent-cost-guard
+npm install --save-dev @ashishkaloge/agent-cost-guard@0.1.0
 ```
 
-Until the package is published, use a local checkout instead:
+For development, install a local checkout instead:
 
 ```bash
 npm install --save-dev /absolute/path/to/agent-cost-guard
