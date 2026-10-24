@@ -1,6 +1,6 @@
 {
   "name": "@ashishkaloge/agent-cost-guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local, deterministic policy gate that inspects proposed agent commands and tool calls for cost-bearing actions and returns allow, approval-required, or block.",
   "type": "module",
   "license": "MIT",
