@@ -1,0 +1,157 @@
+name: Prepare npm release
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Stable package version already merged into main
+        required: true
+        type: string
+      dry_run:
+        description: Validate and archive only; do not stage on npm
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'ashishkaloge/agent-cost-guard' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    env:
+      EXPECTED_VERSION: ${{ inputs.expected_version }}
+      NPM_CONFIG_USERCONFIG: /dev/null
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install the release npm CLI
+        run: npm install --global npm@11.21.1 --ignore-scripts --no-audit --no-fund
+      - name: Validate the selected source and version
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git ls-remote https://github.com/ashishkaloge/agent-cost-guard.git refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          assert.match(process.env.EXPECTED_VERSION, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
+          assert.equal(pkg.version, process.env.EXPECTED_VERSION);
+          assert.equal(pkg.name, '@ashishkaloge/agent-cost-guard');
+          assert.equal(pkg.repository.url, 'git+https://github.com/ashishkaloge/agent-cost-guard.git');
+          assert.equal(pkg.private, undefined);
+          NODE
+      - name: Run tests and CLI checks
+        run: |
+          npm ci --ignore-scripts
+          npm run typecheck
+          npm run lint
+          npm test
+          npm run build
+          npm run smoke
+          npm audit --omit=dev
+          git diff --exit-code
+      - name: Pack and inspect the release archive
+        id: pack
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-release"
+          npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/npm-release" > "$RUNNER_TEMP/npm-release/pack.json"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dir = path.join(process.env.RUNNER_TEMP, 'npm-release');
+          const packs = JSON.parse(fs.readFileSync(path.join(dir, 'pack.json'), 'utf8'));
+          assert.equal(packs.length, 1);
+          const [pack] = packs;
+          assert.equal(pack.name, '@ashishkaloge/agent-cost-guard');
+          assert.equal(pack.version, process.env.EXPECTED_VERSION);
+          assert.equal(path.basename(pack.filename), pack.filename);
+          const allowed = /^(?:dist\/(?:[a-z-]+\/)?[a-z-]+\.(?:js|d\.ts)|rules\/[a-z-]+\.json|docs\/(?:ARCHITECTURE\.md|INTEGRATIONS\.md|assets\/agent-cost-guard-demo\.svg)|examples\/(?:claude-code\/settings|codex\/hooks|cursor\/hooks|github-copilot\/(?:copilot-cli|copilot-cloud|copilot-vscode))\.json|(?:package\.json|README\.md|LICENSE|CONTRIBUTING\.md|SECURITY\.md))$/;
+          assert.ok(pack.files.length > 0);
+          assert.ok(pack.files.every(file => allowed.test(file.path)), 'Unexpected file in release archive');
+          assert.ok(pack.files.some(file => file.path === 'dist/bin.js'));
+          const archive = fs.readFileSync(path.join(dir, pack.filename));
+          fs.renameSync(path.join(dir, pack.filename), path.join(dir, 'package.tgz'));
+          const sha256 = crypto.createHash('sha256').update(archive).digest('hex');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `sha256=${sha256}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            `Package: ${pack.name}@${pack.version}\n\nCommit: ${process.env.GITHUB_SHA}\n\nArchive SHA-256: ${sha256}\n`);
+          NODE
+      - name: Smoke test the exact archive
+        run: |
+          npm install --prefix "$RUNNER_TEMP/npm-consumer" "$RUNNER_TEMP/npm-release/package.tgz" --ignore-scripts --no-audit --no-fund
+          "$RUNNER_TEMP/npm-consumer/node_modules/.bin/agent-cost-guard" --help
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: npm-release-${{ github.sha }}
+          path: ${{ runner.temp }}/npm-release/
+          if-no-files-found: error
+          retention-days: 7
+
+  stage:
+    if: ${{ !inputs.dry_run }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_VERSION: ${{ inputs.expected_version }}
+      EXPECTED_SHA256: ${{ needs.prepare.outputs.sha256 }}
+      NPM_CONFIG_USERCONFIG: /dev/null
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install the release npm CLI
+        run: npm install --global npm@11.21.1 --ignore-scripts --no-audit --no-fund
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: npm-release-${{ github.sha }}
+          path: ${{ runner.temp }}/npm-release/
+      - name: Verify the archive and unpublished version
+        run: |
+          test "$(git ls-remote https://github.com/ashishkaloge/agent-cost-guard.git refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { execFileSync } from 'node:child_process';
+          const archive = path.join(process.env.RUNNER_TEMP, 'npm-release/package.tgz');
+          assert.equal(crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex'), process.env.EXPECTED_SHA256);
+          const pkg = JSON.parse(execFileSync('tar', ['-xOf', archive, 'package/package.json'], { encoding: 'utf8' }));
+          assert.equal(pkg.name, '@ashishkaloge/agent-cost-guard');
+          assert.equal(pkg.version, process.env.EXPECTED_VERSION);
+          assert.equal(pkg.repository.url, 'git+https://github.com/ashishkaloge/agent-cost-guard.git');
+          const url = `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/${encodeURIComponent(pkg.version)}`;
+          const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+          assert.equal(response.status, 404, 'Version already exists or the registry could not confirm its absence');
+          NODE
+      - name: Stage with OIDC and provenance
+        run: |
+          unset NODE_AUTH_TOKEN NPM_TOKEN
+          npm stage publish "$RUNNER_TEMP/npm-release/package.tgz" --ignore-scripts --access public --tag latest --provenance --registry https://registry.npmjs.org
+          echo 'Staged for maintainer review. Approve separately on npm with 2FA after inspecting the package and provenance.' >> "$GITHUB_STEP_SUMMARY"
